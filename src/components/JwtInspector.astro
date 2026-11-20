@@ -1,0 +1,266 @@
+---
+interface Props {
+  compact?: boolean;
+}
+const { compact = false } = Astro.props;
+---
+<div class="panel" data-jwt data-compact={compact ? "1" : "0"}>
+  <div class="ph">
+    <span>jwt.inspect</span>
+    <span class="tag live">live</span>
+  </div>
+  <textarea data-input spellcheck="false" aria-label="JSON Web Token" placeholder="paste header.payload.signature"></textarea>
+  <div class="out">
+    <div>
+      <div class="kv">header</div>
+      <pre data-header></pre>
+    </div>
+    <div>
+      <div class="kv">payload</div>
+      <pre data-payload></pre>
+    </div>
+    <div class="chips" data-chips aria-live="polite"></div>
+  </div>
+  {
+    !compact && (
+      <div class="out out-rule">
+        <div class="row-btns">
+          <button class="btn btn-g btn-s" data-crack type="button">Check common secrets</button>
+          <span class="hint" data-crack-status></span>
+        </div>
+      </div>
+    )
+  }
+  <div class="pfoot">
+    <span data-timing>—</span>
+    <span>no request sent</span>
+  </div>
+</div>
+
+<script>
+  const SECRETS = [
+    "secret", "password", "123456", "1234567890", "changeme", "admin", "jwt",
+    "jwtsecret", "jwt-secret", "supersecret", "super-secret", "your-256-bit-secret",
+    "your_jwt_secret", "key", "secretkey", "secret-key", "test", "dev", "development",
+    "production", "private", "privatekey", "s3cr3t", "s3cret", "topsecret", "top-secret",
+    "letmein", "hunter2", "qwerty", "iloveyou", "token", "tokenkey", "auth", "authkey",
+    "app", "appsecret", "app-secret", "mysecret", "my-secret", "bradawl", "helloworld",
+    "default", "example", "demo", "sample", "1234", "12345", "abcdef", "aaaaaa",
+    "secret123", "password123", "P@ssw0rd", "p@ssword", "root", "toor", "api", "apikey",
+  ];
+
+  const b64uEncode = (obj: unknown) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  };
+
+  const b64uDecode = (seg: string) => {
+    const t = seg.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = (4 - (t.length % 4)) % 4;
+    const bin = atob(t + "=".repeat(pad));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  };
+
+  const fmtLeft = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h`;
+    return `${Math.floor(s / 86400)}d`;
+  };
+
+  const chip = (text: string, kind = "") => {
+    const el = document.createElement("span");
+    el.className = "chip" + (kind ? " " + kind : "");
+    el.textContent = text;
+    return el;
+  };
+
+  async function hmac(alg: string, secret: string, data: string) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      enc.encode(secret),
+      { name: "HMAC", hash: alg },
+      false,
+      ["sign"],
+    );
+    const sig = await crypto.subtle.sign("HMAC", key, enc.encode(data));
+    const bytes = new Uint8Array(sig);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const SAMPLE = [
+    b64uEncode({ alg: "HS256", typ: "JWT" }),
+    b64uEncode({ sub: "u_1042", role: "user", iat: now - 60, exp: now + 10800 }),
+    "q7Zk1nR4vT0bYw8sLm3XjH6pQa9dFg2E",
+  ].join(".");
+
+  document.querySelectorAll<HTMLElement>("[data-jwt]").forEach((root) => {
+    const input = root.querySelector<HTMLTextAreaElement>("[data-input]")!;
+    const hdrEl = root.querySelector<HTMLElement>("[data-header]")!;
+    const plEl = root.querySelector<HTMLElement>("[data-payload]")!;
+    const chipsEl = root.querySelector<HTMLElement>("[data-chips]")!;
+    const timeEl = root.querySelector<HTMLElement>("[data-timing]")!;
+    const crackBtn = root.querySelector<HTMLButtonElement>("[data-crack]");
+    const crackStatus = root.querySelector<HTMLElement>("[data-crack-status]");
+
+    const renderError = (msg: string) => {
+      hdrEl.className = "err";
+      hdrEl.textContent = msg;
+      plEl.className = "";
+      plEl.textContent = "—";
+      chipsEl.replaceChildren(chip("invalid token", "bad"));
+      timeEl.textContent = "not parsed";
+      root.classList.remove("flash");
+    };
+
+    let flashTimer: number | undefined;
+    const inspect = () => {
+      const raw = input.value.trim();
+      if (!raw) return renderError("paste a token");
+      if (raw.length > 100_000) return renderError("token is too large to inspect");
+      const t0 = performance.now();
+      const parts = raw.split(".");
+      if (parts.length < 2) return renderError("not a jwt — expected header.payload.signature");
+
+      let header: Record<string, unknown>;
+      let payload: Record<string, unknown>;
+      try {
+        const h = b64uDecode(parts[0]);
+        const p = parts[1] ? b64uDecode(parts[1]) : {};
+        if (!h || typeof h !== "object" || Array.isArray(h))
+          return renderError("header is not a json object");
+        if (!p || typeof p !== "object" || Array.isArray(p))
+          return renderError("payload is not a json object");
+        header = h as Record<string, unknown>;
+        payload = p as Record<string, unknown>;
+      } catch {
+        return renderError("base64url decode failed — segment is not valid json");
+      }
+
+      const ms = (performance.now() - t0).toFixed(2);
+      hdrEl.className = "";
+      plEl.className = "";
+      hdrEl.textContent = JSON.stringify(header, null, 2);
+      plEl.textContent = JSON.stringify(payload, null, 2);
+
+      const out: HTMLElement[] = [];
+      const alg = typeof header.alg === "string" ? header.alg : "";
+      if (/^none$/i.test(alg)) out.push(chip("alg:none — unsigned", "bad"));
+      else if (alg) out.push(chip(alg, "ok"));
+      else out.push(chip("no alg", "bad"));
+
+      if (typeof payload.exp === "number" && Number.isFinite(payload.exp)) {
+        const left = payload.exp * 1000 - Date.now();
+        if (left <= 0) out.push(chip(`expired ${fmtLeft(-left)} ago`, "bad"));
+        else out.push(chip(`exp in ${fmtLeft(left)}`, "ok"));
+      } else out.push(chip("no exp claim", "warn"));
+
+      if (parts.length < 3 || !parts[2]) out.push(chip("signature missing", "bad"));
+      if (typeof header.kid === "string") out.push(chip(`kid ${header.kid}`, ""));
+      if (payload.role === "admin" || "is_admin" in payload)
+        out.push(chip("elevated claim present", "warn"));
+
+      chipsEl.replaceChildren(...out);
+      timeEl.textContent = `decoded in ${ms} ms`;
+
+      root.classList.remove("flash");
+      void root.offsetWidth;
+      root.classList.add("flash");
+      clearTimeout(flashTimer);
+      flashTimer = window.setTimeout(() => root.classList.remove("flash"), 700);
+    };
+
+    let timer: number | undefined;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(inspect, 140);
+    });
+
+    input.value = SAMPLE;
+    inspect();
+
+    // Outside the compact hero, swap in a token actually signed with a weak
+    // secret so the "check common secrets" demo can succeed instead of always
+    // reporting a miss.
+    const demoToken = async () => {
+      if (root.dataset.compact === "1") return;
+      if (!globalThis.crypto?.subtle) return;
+      try {
+        const head = b64uEncode({ alg: "HS256", typ: "JWT" });
+        const body = b64uEncode({ sub: "u_1042", role: "user", iat: now - 60, exp: now + 10800 });
+        const sig = await hmac("SHA-256", "secret", head + "." + body);
+        // Do not clobber a token the visitor started typing while the demo
+        // signature was being computed.
+        if (input.value.trim() && input.value !== SAMPLE) return;
+        input.value = head + "." + body + "." + sig;
+        inspect();
+      } catch {}
+    };
+    void demoToken();
+
+    crackBtn?.addEventListener("click", async () => {
+      if (!crackStatus) return;
+      const raw = input.value.trim();
+      const parts = raw.split(".");
+      if (parts.length < 3 || !parts[2]) {
+        crackStatus.textContent = "token has no signature segment";
+        return;
+      }
+      const alg = String((() => {
+        try {
+          return b64uDecode(parts[0]).alg;
+        } catch {
+          return "";
+        }
+      })());
+      const hash = /^HS(256|384|512)$/i.exec(alg)?.[1];
+      if (!crackStatus) return;
+      crackStatus.textContent = "";
+      if (!hash) {
+        crackStatus.textContent = "signature check only applies to HS256/384/512";
+        return;
+      }
+      if (!globalThis.crypto?.subtle) {
+        crackStatus.textContent = "subtle crypto unavailable — serve over https or localhost";
+        return;
+      }
+      crackBtn.disabled = true;
+      crackStatus.textContent = "trying " + SECRETS.length + " secrets…";
+
+      let found: string | null = null;
+      const provided = parts[2].replace(/=+$/, "");
+      for (const secret of SECRETS) {
+        try {
+          const sig = await hmac(`SHA-${hash}`, secret, parts[0] + "." + parts[1]);
+          if (sig === provided) {
+            found = secret;
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+      crackBtn.disabled = false;
+      if (found) {
+        crackStatus.textContent = "";
+        crackStatus.append(
+          Object.assign(document.createElement("span"), {
+            className: "chip bad",
+            textContent: `secret found: ${found}`,
+          }),
+        );
+      } else {
+        crackStatus.textContent = `no match in ${SECRETS.length} common secrets`;
+      }
+    });
+  });
+</script>

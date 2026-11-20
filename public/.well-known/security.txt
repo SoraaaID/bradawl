@@ -1,0 +1,4 @@
+Contact: mailto:hello@bradawl.dev
+Expires: 2027-12-31T23:59:00.000Z
+Preferred-Languages: en, id
+Canonical: https://bradawl.dev/.well-known/security.txt

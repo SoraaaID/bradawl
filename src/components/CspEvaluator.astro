@@ -1,0 +1,297 @@
+---
+---
+<div class="shell" data-csp>
+  <div class="shell-h">
+    <span>csp.evaluate</span>
+    <span class="tag live">live</span>
+  </div>
+
+  <div class="shell-b">
+    <div class="field">
+      <label for="csp-in">content-security-policy</label>
+      <textarea id="csp-in" data-input spellcheck="false" class="min-h-110">default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.example.com; style-src 'self' 'unsafe-inline'; img-src *; object-src 'self'; frame-ancestors 'self'</textarea>
+      <span class="hint">paste the header value, not the header name</span>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <div class="kv mb-7">score</div>
+        <div class="score g-c" data-score><span class="g" data-grade>—</span><span class="n" data-points>0 / 100</span></div>
+      </div>
+      <div class="ta-r">
+        <div class="kv mb-7">directives</div>
+        <div class="mono-24" data-count>0</div>
+      </div>
+    </div>
+
+    <div class="findings" data-findings></div>
+
+    <div class="field mt-6">
+      <div class="flex-between">
+        <label>stricter starting point</label>
+        <button class="btn btn-g btn-s" data-copy type="button">Copy</button>
+      </div>
+      <pre class="mono-block sm" data-generated></pre>
+      <span class="hint">replace the nonce with a per-response value; drop directives your app does not need</span>
+    </div>
+  </div>
+
+  <div class="shell-f">
+    <span>evaluated in the tab</span>
+    <span data-timing>—</span>
+  </div>
+</div>
+
+<script>
+  type Finding = { sev: "high" | "med" | "low" | "ok"; title: string; why: string };
+
+  function parsePolicy(policy: string) {
+    const map = new Map<string, string[]>();
+    policy
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((part) => {
+        const [name, ...values] = part.split(/\s+/);
+        if (!name) return;
+        const key = name.toLowerCase();
+        // CSP uses the first occurrence of a repeated directive and ignores
+        // the rest; Map.set would quietly let the last one win.
+        if (!map.has(key)) map.set(key, values);
+      });
+    return map;
+  }
+
+  const hasKw = (values: string[], kw: string) =>
+    values.some((v) => v.toLowerCase() === kw);
+
+  function evaluate(map: Map<string, string[]>): Finding[] {
+    const out: Finding[] = [];
+    const get = (k: string) => map.get(k) || [];
+    const has = (k: string) => map.has(k);
+    const scriptBase = has("script-src") ? get("script-src") : get("default-src");
+    const scriptSrc = has("script-src-elem") ? get("script-src-elem") : scriptBase;
+    const scriptAttr = has("script-src-attr") ? get("script-src-attr") : scriptBase;
+    const styleBase = has("style-src") ? get("style-src") : get("default-src");
+    const styleSrc = has("style-src-elem") ? get("style-src-elem") : styleBase;
+    const allValues = [...map.values()].flat();
+
+    if (!has("default-src") && !has("script-src")) {
+      out.push({
+        sev: "high",
+        title: "no default-src and no script-src",
+        why: "without a default, any resource type is allowed by omission. start with default-src 'self'.",
+      });
+    } else if (!has("default-src")) {
+      out.push({
+        sev: "med",
+        title: "no default-src",
+        why: "every type you did not list stays unrestricted. set default-src 'none' or 'self' as the floor.",
+      });
+    }
+
+    const inlineScript = hasKw(scriptSrc, "'unsafe-inline'")
+      ? "script-src"
+      : hasKw(scriptAttr, "'unsafe-inline'")
+        ? "script-src-attr"
+        : "";
+    if (inlineScript) {
+      out.push({
+        sev: "high",
+        title: `'unsafe-inline' in ${inlineScript}`,
+        why: "inline script executes, which defeats the main purpose of CSP against XSS. move to nonces or hashes.",
+      });
+    }
+    if (hasKw(styleSrc, "'unsafe-inline'") || hasKw(styleBase, "'unsafe-inline'")) {
+      out.push({
+        sev: "low",
+        title: "'unsafe-inline' in style-src",
+        why: "injected CSS can overlay the page, restyle a login form or exfiltrate attribute values. move styles to files or a nonce.",
+      });
+    }
+    if (hasKw(scriptBase, "'unsafe-eval'")) {
+      out.push({
+        sev: "high",
+        title: "'unsafe-eval' in script-src",
+        why: "eval, new Function and string timers are allowed. remove it and refactor the calls.",
+      });
+    }
+    const wildcard = allValues.find(
+      (v) => v === "*" || /^[a-z][a-z0-9+.-]*:\/\/\*(?::\d+)?$/i.test(v),
+    );
+    if (wildcard) {
+      out.push({
+        sev: "high",
+        title: "wildcard source",
+        why: `${wildcard} allows every host for that directive. name the hosts instead.`,
+      });
+    }
+    if (scriptSrc.some((v) => /^data:/i.test(v))) {
+      out.push({
+        sev: "med",
+        title: "data: in script-src",
+        why: "base64 script payloads execute without a network request. only keep this if you truly need it.",
+      });
+    }
+    const insecure = allValues.filter((v) => /^(http|ws):/i.test(v));
+    if (insecure.length) {
+      out.push({
+        sev: "med",
+        title: "plaintext schemes allowed",
+        why: `${[...new Set(insecure)].join(", ")} can be injected on hostile networks. use https/wss.`,
+      });
+    }
+    if (scriptSrc.some((v) => /https?:\/\/(cdn|unpkg|jsdelivr|cdnjs)/i.test(v)) || scriptSrc.some((v) => /\.(cloudfront|akamai)/i.test(v))) {
+      out.push({
+        sev: "low",
+        title: "third-party script host in script-src",
+        why: "every host in script-src is an origin that can serve code into your page. vendor and self-host where possible.",
+      });
+    }
+    const objectSrc = get("object-src");
+    if (!hasKw(objectSrc, "'none'") && !hasKw(get("default-src"), "'none'")) {
+      out.push({
+        sev: "med",
+        title: "object-src is not 'none'",
+        why: "plugins and legacy embed vectors stay open. object-src 'none' costs nothing.",
+      });
+    }
+    if (!has("base-uri")) {
+      out.push({
+        sev: "med",
+        title: "no base-uri",
+        why: "an injected <base> can retarget every relative URL on the page. set base-uri 'none'.",
+      });
+    }
+    if (!has("frame-ancestors")) {
+      out.push({
+        sev: "low",
+        title: "no frame-ancestors",
+        why: "clickjacking protection is left to X-Frame-Options. put frame-ancestors 'none' in the policy.",
+      });
+    } else {
+      out.push({
+        sev: "ok",
+        title: "frame-ancestors present",
+        why: "keep this one in the HTTP header — browsers ignore frame-ancestors inside a <meta> policy.",
+      });
+    }
+    const hasNonceOrHash = scriptSrc.some((v) => /^'(nonce|sha256|sha384|sha512)-/i.test(v));
+    if (hasNonceOrHash) {
+      out.push({
+        sev: "ok",
+        title: "nonce or hash present",
+        why: "per-response nonces are the strongest inline-script story CSP has.",
+      });
+    } else if (!hasKw(scriptSrc, "'unsafe-inline'")) {
+      out.push({
+        sev: "low",
+        title: "no nonce or hash",
+        why: "inline scripts will be blocked outright. if the app needs them, add 'nonce-<random>' per response.",
+      });
+    }
+    if (!map.has("report-uri") && !map.has("report-to")) {
+      out.push({
+        sev: "low",
+        title: "no reporting endpoint",
+        why: "you will not see what the policy blocks in production. add report-to with a collected endpoint.",
+      });
+    }
+
+    return out;
+  }
+
+  const PENALTY = { high: 24, med: 10, low: 4, ok: 0 };
+
+  function makeNonce() {
+    const bytes = new Uint8Array(18);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/=+$/, "");
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-csp]").forEach((root) => {
+    const input = root.querySelector<HTMLTextAreaElement>("[data-input]")!;
+    const findingsEl = root.querySelector<HTMLElement>("[data-findings]")!;
+    const gradeEl = root.querySelector<HTMLElement>("[data-grade]")!;
+    const pointsEl = root.querySelector<HTMLElement>("[data-points]")!;
+    const countEl = root.querySelector<HTMLElement>("[data-count]")!;
+    const scoreEl = root.querySelector<HTMLElement>("[data-score]")!;
+    const genEl = root.querySelector<HTMLElement>("[data-generated]")!;
+    const timeEl = root.querySelector<HTMLElement>("[data-timing]")!;
+    const copyBtn = root.querySelector<HTMLButtonElement>("[data-copy]")!;
+    const nonce = makeNonce();
+
+    const generated = [
+      "default-src 'self'",
+      `script-src 'self' 'nonce-${nonce}'`,
+      `style-src 'self' 'nonce-${nonce}'`,
+      "img-src 'self' data:",
+      "font-src 'self'",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "upgrade-insecure-requests",
+    ].join("; ");
+    genEl.textContent = generated;
+
+    const render = () => {
+      const t0 = performance.now();
+      const map = parsePolicy(input.value);
+      const findings = evaluate(map);
+      const penalty = findings.reduce((sum, f) => sum + PENALTY[f.sev], 0);
+      const score = Math.max(0, Math.min(100, 100 - penalty));
+      const grade =
+        score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : score >= 50 ? "E" : "F";
+
+      gradeEl.textContent = grade;
+      pointsEl.textContent = `${score} / 100`;
+      countEl.textContent = String(map.size);
+      scoreEl.className = "score g-" + grade.toLowerCase();
+
+      const order = { high: 0, med: 1, low: 2, ok: 3 };
+      findings.sort((a, b) => order[a.sev] - order[b.sev]);
+
+      findingsEl.replaceChildren(
+        ...findings.map((f) => {
+          const d = document.createElement("div");
+          d.className = "finding";
+          const sev = document.createElement("div");
+          sev.className = "sev " + f.sev;
+          sev.textContent = f.sev;
+          const body = document.createElement("div");
+          const b = document.createElement("b");
+          b.textContent = f.title;
+          const p = document.createElement("p");
+          p.textContent = f.why;
+          body.append(b, p);
+          d.append(sev, body);
+          return d;
+        }),
+      );
+
+      timeEl.textContent = `${(performance.now() - t0).toFixed(2)} ms`;
+    };
+
+    let timer: number | undefined;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(render, 120);
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      const label = copyBtn.dataset.label || (copyBtn.dataset.label = copyBtn.textContent || "");
+      try {
+        await navigator.clipboard.writeText(generated);
+        copyBtn.textContent = "Copied";
+        setTimeout(() => (copyBtn.textContent = label), 1200);
+      } catch {
+        copyBtn.textContent = "Select manually";
+        setTimeout(() => (copyBtn.textContent = label), 1600);
+      }
+    });
+
+    render();
+  });
+</script>

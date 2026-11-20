@@ -1,0 +1,577 @@
+---
+---
+<div class="shell" data-har>
+  <div class="shell-h">
+    <span>har.sanitize</span>
+    <span class="tag live">runs locally</span>
+  </div>
+
+  <div class="shell-b">
+    <label class="drop" data-drop>
+      <input type="file" accept=".har,.json,application/json" class="vh" data-file />
+      <strong>Drop a .har file</strong>
+      <span>or click to choose &nbsp;·&nbsp; max 40 MB &nbsp;·&nbsp; parsed in this tab</span>
+    </label>
+
+    <div class="chkrow">
+      <label class="chk"><input type="checkbox" data-opt="headers" checked /> cookies &amp; auth headers</label>
+      <label class="chk"><input type="checkbox" data-opt="query" checked /> query parameters</label>
+      <label class="chk"><input type="checkbox" data-opt="bodies" checked /> request &amp; response bodies</label>
+      <label class="chk"><input type="checkbox" data-opt="pii" checked /> emails &amp; JWTs in text</label>
+    </div>
+
+    <div class="row-btns">
+      <button class="btn btn-g btn-s" data-sample type="button">Try a sample</button>
+      <span class="hint" data-status>nothing loaded</span>
+    </div>
+
+    <div data-result hidden>
+      <div class="summary" data-summary></div>
+      <div class="findings" data-findings></div>
+    </div>
+
+    <pre class="mono-block sm" data-error hidden></pre>
+  </div>
+
+  <div class="shell-f">
+    <span data-filesize>—</span>
+    <button class="btn btn-p btn-s" data-download disabled type="button">Download sanitized .har</button>
+  </div>
+</div>
+
+<style>
+  .chkrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .chk {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .chk input {
+    accent-color: var(--acc);
+    margin: 0;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .summary div {
+    background: var(--panel);
+    padding: 11px 13px;
+  }
+  .summary .n {
+    font-family: var(--mono);
+    font-size: 17px;
+    letter-spacing: -0.01em;
+  }
+  .summary .l {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-top: 3px;
+  }
+  .hosts {
+    margin-top: 12px;
+  }
+  @media (max-width: 640px) {
+    .summary {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>
+
+<script>
+  const REDACTED = "[redacted]";
+  const MAX_BYTES = 40 * 1024 * 1024;
+
+  const SENSITIVE_HEADERS = new Set([
+    "cookie",
+    "set-cookie",
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "x-access-token",
+    "x-csrf-token",
+    "x-xsrf-token",
+    "x-session-id",
+    "x-amz-security-token",
+    "x-amz-credential",
+    "api-key",
+    "apikey",
+  ]);
+
+  // The set catches the exact names; the regex catches vendor variations
+  // (X-Auth-Key, X-Company-Token, X-Signature) that the set would miss.
+  const SENSITIVE_HEADER_RE = /(auth|cookie|token|api[-_]?key|secret|session|signature|credential)/i;
+
+  const SENSITIVE_PARAMS =
+    /^(token|access[_-]?token|id[_-]?token|refresh[_-]?token|auth[_-]?token|code|key|api[_-]?key|sig|signature|password|passwd|pwd|secret|client[_-]?secret|session|sessionid|sid|auth|otp|nonce|state|credential|x-amz-signature|x-amz-credential|x-amz-security-token|x-goog-signature)$/i;
+
+  const SENSITIVE_BODY_KEYS =
+    /(pass(word|wd)?|pwd|secret|token|cookie|auth|api[_-]?key|apikey|session|csrf|xsrf|otp|ssn|card(number)?|cvv|cvc|pin)$/i;
+
+  const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]{2,}/g;
+  const JWT_RE = /eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g;
+  const BEARER_RE = /Bearer\s+[A-Za-z0-9._~+/=-]{8,}/g;
+  // Non-global copies for boolean tests; reusing a /g regex with .test()
+  // advances lastIndex and makes the next answer depend on the previous one.
+  const EMAIL_TEST = /[\w.+-]+@[\w-]+\.[\w.-]{2,}/;
+  const JWT_TEST = /eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/;
+
+  type Stats = Record<string, number>;
+
+  const bump = (stats: Stats, key: string, n = 1) => {
+    stats[key] = (stats[key] || 0) + n;
+  };
+
+  function redactText(text: string, stats: Stats, pii: boolean) {
+    let out = text;
+    if (pii) {
+      out = out
+        .replace(EMAIL_RE, () => {
+          bump(stats, "emails");
+          return "[email]";
+        })
+        .replace(JWT_RE, () => {
+          bump(stats, "jwts");
+          return "[jwt]";
+        });
+    }
+    out = out.replace(BEARER_RE, () => {
+      bump(stats, "bearer tokens");
+      return "Bearer [redacted]";
+    });
+    return out;
+  }
+
+  // application/x-www-form-urlencoded bodies are still the most common login
+  // shape in a HAR, and they never reach the JSON walker.
+  function redactForm(text: string, stats: Stats, pii: boolean) {
+    // encodeURIComponent turns [redacted] into %5Bredacted%5D; keep the
+    // sentinel literal so the exported file reads and greps clean.
+    const enc = (v: string) => encodeURIComponent(v).replace(/%5B(redacted|email|jwt)%5D/gi, "[$1]");
+    return text
+      .split("&")
+      .map((pair) => {
+        const i = pair.indexOf("=");
+        if (i < 1) return pair;
+        const rawKey = pair.slice(0, i);
+        const rawVal = pair.slice(i + 1);
+        let name = rawKey;
+        let value = rawVal;
+        try {
+          name = decodeURIComponent(rawKey.replace(/\+/g, " "));
+          value = decodeURIComponent(rawVal.replace(/\+/g, " "));
+        } catch {}
+        if (SENSITIVE_BODY_KEYS.test(name) || SENSITIVE_PARAMS.test(name)) {
+          bump(stats, "body fields");
+          return rawKey + "=" + enc(REDACTED);
+        }
+        const clean = redactText(value, stats, pii);
+        if (clean !== value) return rawKey + "=" + enc(clean);
+        return pair;
+      })
+      .join("&");
+  }
+
+  function redactJson(text: string, stats: Stats, pii: boolean) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      if (/^[^=&\s]+=[^&]*(?:&[^=&\s]+=[^&]*)*$/.test(text.trim())) return redactForm(text, stats, pii);
+      return redactText(text, stats, pii);
+    }
+    const walk = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === "object") {
+        const o: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+          if (SENSITIVE_BODY_KEYS.test(k) && val !== null && val !== "") {
+            o[k] = REDACTED;
+            bump(stats, "body fields");
+          } else {
+            o[k] = walk(val);
+          }
+        }
+        return o;
+      }
+      if (typeof v === "string" && pii) return redactText(v, stats, pii);
+      return v;
+    };
+    return JSON.stringify(walk(parsed));
+  }
+
+  function redactUrl(raw: string, stats: Stats, pii: boolean) {
+    try {
+      const u = new URL(raw);
+      if (u.username || u.password) {
+        u.username = "";
+        u.password = "";
+        bump(stats, "url credentials");
+      }
+      u.searchParams.forEach((value, key) => {
+        if (!value) return;
+        if (SENSITIVE_PARAMS.test(key)) {
+          u.searchParams.set(key, REDACTED);
+          bump(stats, "query params");
+          return;
+        }
+        if (!pii) return;
+        if (EMAIL_TEST.test(value)) {
+          u.searchParams.set(key, "[email]");
+          bump(stats, "emails");
+        } else if (JWT_TEST.test(value)) {
+          u.searchParams.set(key, "[jwt]");
+          bump(stats, "jwts");
+        }
+      });
+      // URL serialisation percent-encodes the brackets; the file reads better
+      // and greps cleaner with the literal sentinel.
+      return u.toString().replace(/%5B(redacted|email|jwt)%5D/gi, (_, tag) => `[${tag}]`);
+    } catch {
+      return raw;
+    }
+  }
+
+  function sanitize(har: any, opts: Record<string, boolean>, stats: Stats) {
+    const entries = har?.log?.entries;
+    if (!Array.isArray(entries)) throw new Error("not a HAR — log.entries is missing");
+    const hosts = new Map<string, number>();
+
+    for (const e of entries) {
+      const req = e.request || {};
+      const res = e.response || {};
+
+      try {
+        hosts.set(new URL(req.url).host, (hosts.get(new URL(req.url).host) || 0) + 1);
+      } catch {}
+
+      if (opts.headers) {
+        for (const side of [req.headers, res.headers]) {
+          if (!Array.isArray(side)) continue;
+          for (const h of side) {
+            if (!h || typeof h.name !== "string" || typeof h.value !== "string") continue;
+            const name = h.name.toLowerCase();
+            if (SENSITIVE_HEADERS.has(name) || SENSITIVE_HEADER_RE.test(h.name)) {
+              h.value = REDACTED;
+              bump(stats, "headers");
+              continue;
+            }
+            // Referer and Location are URLs in a header slot; their query
+            // string can carry the same tokens the URL walker removes.
+            if (opts.query && /^(referer|location)$/.test(name)) {
+              h.value = redactUrl(h.value, stats, opts.pii);
+            }
+            h.value = redactText(h.value, stats, opts.pii);
+          }
+        }
+        for (const c of req.cookies || []) {
+          if (c && c.value) {
+            c.value = REDACTED;
+            bump(stats, "cookies");
+          }
+        }
+        for (const c of res.cookies || []) {
+          if (c && c.value) {
+            c.value = REDACTED;
+            bump(stats, "cookies");
+          }
+        }
+      }
+
+      if (opts.query && typeof req.url === "string") {
+        req.url = redactUrl(req.url, stats, opts.pii);
+        // HAR keeps a structured copy of the query next to the URL; redact
+        // both or the clean URL is a lie.
+        if (Array.isArray(req.queryString)) {
+          for (const q of req.queryString) {
+            if (!q || typeof q.name !== "string" || typeof q.value !== "string" || !q.value) continue;
+            if (SENSITIVE_PARAMS.test(q.name)) {
+              q.value = REDACTED;
+              bump(stats, "query params");
+            } else if (opts.pii) {
+              if (EMAIL_TEST.test(q.value)) {
+                q.value = "[email]";
+                bump(stats, "emails");
+              } else if (JWT_TEST.test(q.value)) {
+                q.value = "[jwt]";
+                bump(stats, "jwts");
+              }
+            }
+          }
+        }
+        if (typeof res.redirectURL === "string" && res.redirectURL) {
+          res.redirectURL = redactUrl(res.redirectURL, stats, opts.pii);
+        }
+      }
+
+      if (opts.bodies) {
+        if (req.postData && typeof req.postData.text === "string") {
+          req.postData.text = redactJson(req.postData.text, stats, opts.pii);
+        }
+        if (req.postData && Array.isArray(req.postData.params)) {
+          for (const p of req.postData.params) {
+            if (!p || typeof p.name !== "string") continue;
+            if (SENSITIVE_BODY_KEYS.test(p.name) && p.value) {
+              p.value = REDACTED;
+              bump(stats, "body fields");
+            } else if (opts.pii && typeof p.value === "string") {
+              p.value = redactText(p.value, stats, true);
+            }
+          }
+        }
+        if (
+          res.content &&
+          res.content.encoding !== "base64" &&
+          typeof res.content.text === "string" &&
+          res.content.text.length < 1_000_000
+        ) {
+          res.content.text = redactJson(res.content.text, stats, opts.pii);
+        }
+      }
+
+      delete e._securityState;
+    }
+
+    return hosts;
+  }
+
+  function formatBytes(n: number) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(2) + " MB";
+  }
+
+  const SAMPLE = {
+    log: {
+      version: "1.2",
+      creator: { name: "bradawl sample", version: "1.0" },
+      entries: [
+        {
+          startedDateTime: new Date().toISOString(),
+          time: 132,
+          request: {
+            method: "POST",
+            url: "https://app.example.com/api/login?token=abc123&next=%2Fdashboard",
+            httpVersion: "HTTP/1.1",
+            headers: [
+              { name: "Cookie", value: "session=8f2a1c9d; csrf=97be" },
+              { name: "Authorization", value: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig" },
+              { name: "Content-Type", value: "application/json" },
+            ],
+            queryString: [{ name: "token", value: "abc123" }],
+            cookies: [{ name: "session", value: "8f2a1c9d" }],
+            postData: {
+              mimeType: "application/json",
+              text: '{"email":"ada@example.com","password":"hunter2","remember":true}',
+            },
+          },
+          response: {
+            status: 200,
+            statusText: "OK",
+            headers: [
+              { name: "Set-Cookie", value: "session=9a8b7c; HttpOnly" },
+              { name: "Content-Type", value: "application/json" },
+            ],
+            cookies: [{ name: "session", value: "9a8b7c" }],
+            content: {
+              mimeType: "application/json",
+              size: 64,
+              text: '{"ok":true,"user":{"email":"ada@example.com","token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"}}',
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  document.querySelectorAll<HTMLElement>("[data-har]").forEach((root) => {
+    const fileInput = root.querySelector<HTMLInputElement>("[data-file]")!;
+    const drop = root.querySelector<HTMLElement>("[data-drop]")!;
+    const statusEl = root.querySelector<HTMLElement>("[data-status]")!;
+    const resultEl = root.querySelector<HTMLElement>("[data-result]")!;
+    const summaryEl = root.querySelector<HTMLElement>("[data-summary]")!;
+    const findingsEl = root.querySelector<HTMLElement>("[data-findings]")!;
+    const errorEl = root.querySelector<HTMLElement>("[data-error]")!;
+    const sizeEl = root.querySelector<HTMLElement>("[data-filesize]")!;
+    const dlBtn = root.querySelector<HTMLButtonElement>("[data-download]")!;
+    const sampleBtn = root.querySelector<HTMLButtonElement>("[data-sample]")!;
+
+    let outputBlob: Blob | null = null;
+    let outputName = "sanitized.har";
+    let lastRun: { text: string; name: string } | null = null;
+
+    const opts = () => {
+      const o: Record<string, boolean> = {};
+      root.querySelectorAll<HTMLInputElement>("[data-opt]").forEach((el) => {
+        o[el.dataset.opt!] = el.checked;
+      });
+      return o;
+    };
+
+    const showError = (msg: string) => {
+      lastRun = null;
+      errorEl.hidden = false;
+      errorEl.textContent = msg;
+      resultEl.hidden = true;
+      dlBtn.disabled = true;
+      statusEl.textContent = "failed";
+    };
+
+    const run = async (text: string, name: string) => {
+      errorEl.hidden = true;
+      resultEl.hidden = true;
+      dlBtn.disabled = true;
+      statusEl.textContent = "parsing…";
+
+      let har: any;
+      try {
+        har = JSON.parse(text);
+      } catch {
+        return showError("that file is not valid JSON");
+      }
+      lastRun = { text, name };
+
+      const stats: Stats = {};
+      let hosts: Map<string, number>;
+      try {
+        hosts = sanitize(har, opts(), stats);
+      } catch (err) {
+        return showError(err instanceof Error ? err.message : String(err));
+      }
+
+      const out = JSON.stringify(har, null, 2);
+      outputBlob = new Blob([out], { type: "application/json" });
+      outputName = name.replace(/\.(har|json)$/i, "") + ".sanitized.har";
+
+      const entries = har.log.entries.length;
+      const total = Object.values(stats).reduce((a, b) => a + b, 0);
+
+      summaryEl.replaceChildren(
+        ...[
+          [String(entries), "requests"],
+          [String(total), "redactions"],
+          [String(hosts.size), "hosts"],
+          [formatBytes(outputBlob.size), "output size"],
+        ].map(([n, l]) => {
+          const d = document.createElement("div");
+          const a = document.createElement("div");
+          a.className = "n";
+          a.textContent = n;
+          const b = document.createElement("div");
+          b.className = "l";
+          b.textContent = l;
+          d.append(a, b);
+          return d;
+        }),
+      );
+
+      const rows = Object.entries(stats).sort((a, b) => b[1] - a[1]);
+      findingsEl.replaceChildren(
+        ...(rows.length
+          ? rows.map(([k, v]) => {
+              const d = document.createElement("div");
+              d.className = "finding";
+              const sev = document.createElement("div");
+              sev.className = "sev ok";
+              sev.textContent = "clean";
+              const body = document.createElement("div");
+              const b = document.createElement("b");
+              b.textContent = `${v}× ${k}`;
+              const p = document.createElement("p");
+              p.textContent = "replaced with " + REDACTED;
+              body.append(b, p);
+              d.append(sev, body);
+              return d;
+            })
+          : [
+              (() => {
+                const d = document.createElement("div");
+                d.className = "finding";
+                d.innerHTML =
+                  '<div class="sev low">none</div><div><b>nothing matched</b><p>no cookies, tokens or PII were found with the current options.</p></div>';
+                return d;
+              })(),
+            ]),
+      );
+
+      resultEl.hidden = false;
+      dlBtn.disabled = false;
+      statusEl.textContent = "sanitized locally";
+      sizeEl.textContent = `${formatBytes(new Blob([text]).size)} in → ${formatBytes(outputBlob.size)} out`;
+    };
+
+    const readFile = async (file: File) => {
+      if (file.size > MAX_BYTES) return showError("file is larger than 40 MB");
+      statusEl.textContent = "reading " + file.name + "…";
+      let text: string;
+      try {
+        text = await file.text();
+      } catch (err) {
+        return showError("could not read the file: " + (err instanceof Error ? err.message : String(err)));
+      }
+      await run(text, file.name);
+    };
+
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files?.[0];
+      // Clearing the value lets the same file fire change again after an edit.
+      fileInput.value = "";
+      if (f) void readFile(f);
+    });
+
+    root.querySelectorAll<HTMLInputElement>("[data-opt]").forEach((el) => {
+      el.addEventListener("change", () => {
+        if (lastRun) void run(lastRun.text, lastRun.name);
+      });
+    });
+
+    ["dragenter", "dragover"].forEach((ev) =>
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        drop.classList.add("over");
+      }),
+    );
+    ["dragleave", "drop"].forEach((ev) =>
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        drop.classList.remove("over");
+      }),
+    );
+    drop.addEventListener("drop", (e) => {
+      const f = (e as DragEvent).dataTransfer?.files?.[0];
+      if (f) readFile(f);
+    });
+
+    sampleBtn.addEventListener("click", () => {
+      void run(JSON.stringify(SAMPLE), "sample.har");
+    });
+
+    dlBtn.addEventListener("click", () => {
+      if (!outputBlob) return;
+      const url = URL.createObjectURL(outputBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = outputName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  });
+</script>

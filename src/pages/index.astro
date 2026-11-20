@@ -1,0 +1,90 @@
+---
+import Base from "../layouts/Base.astro";
+import JwtInspector from "../components/JwtInspector.astro";
+import ToolCard from "../components/ToolCard.astro";
+import { tools } from "../data/tools";
+import { SITE, TAGLINE } from "../data/site";
+---
+
+<Base
+  title={`${SITE.name} — ${TAGLINE}`}
+  description="Six client-side security utilities. Decode a JWT, scrub a HAR, grade your headers. Nothing leaves the browser."
+  facts
+>
+  <div class="wrap">
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow"><i></i>six tools live · v1.0</div>
+        <h1>Security tools<br />that run in your tab.</h1>
+        <p class="sub">
+          Six utilities for people who read headers. No uploads, no accounts, no requests after load.
+        </p>
+        <div class="ctas">
+          <a class="btn btn-p" href="#tools">Open the toolkit</a>
+          <a class="btn btn-g" href="#work">Read case notes</a>
+        </div>
+        <div class="hero-note">
+          <span>parsed in-browser</span>
+          <span>·</span>
+          <span>0 trackers</span>
+          <span>·</span>
+          <span>open source</span>
+        </div>
+      </div>
+
+      <div class="hero-side">
+        <JwtInspector compact />
+      </div>
+    </section>
+
+    <section class="sec" id="tools">
+      <h2>The toolkit</h2>
+      <p class="h2meta">06 utilities · 0 backend · every parse happens in the tab</p>
+
+      <div class="tools">
+        {tools.map((tool) => <ToolCard tool={tool} />)}
+      </div>
+    </section>
+
+    <section class="sec" id="work">
+      <h2>Case notes<span class="pill">placeholder data</span></h2>
+      <p class="h2meta">disclosures with program names removed per policy</p>
+
+      <div class="log">
+        <div class="row">
+          <div class="meta">2026 · fintech<br />web · api</div>
+          <div>
+            <h3>Race condition in checkout</h3>
+            <p>
+              Parallel coupon redemption over a single order. Four discounts applied from one cart; the
+              ledger reconciled only at settlement.
+            </p>
+          </div>
+          <div class="amt">$4,000<span>paid</span></div>
+        </div>
+        <div class="row">
+          <div class="meta">2026 · saas<br />web</div>
+          <div>
+            <h3>Cross-tenant file read</h3>
+            <p>
+              Attachment IDs were sequential and checked for existence, not ownership. One authenticated
+              request reached another workspace's invoices.
+            </p>
+          </div>
+          <div class="amt">$1,500<span>paid</span></div>
+        </div>
+        <div class="row">
+          <div class="meta">2025 · marketplace<br />auth</div>
+          <div>
+            <h3>Signature check skipped on legacy route</h3>
+            <p>
+              An old API version verified the JWT shape but never the signature. Forged tokens from any
+              account were accepted on that path only.
+            </p>
+          </div>
+          <div class="amt">$2,200<span>paid</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</Base>

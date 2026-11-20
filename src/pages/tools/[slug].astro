@@ -1,0 +1,132 @@
+---
+import Base from "../../layouts/Base.astro";
+import HarSanitizer from "../../components/HarSanitizer.astro";
+import JwtInspector from "../../components/JwtInspector.astro";
+import CspEvaluator from "../../components/CspEvaluator.astro";
+import HeaderAnalyzer from "../../components/HeaderAnalyzer.astro";
+import PayloadBench from "../../components/PayloadBench.astro";
+import EndpointMapper from "../../components/EndpointMapper.astro";
+import { tools, type ToolSlug } from "../../data/tools";
+import { SITE } from "../../data/site";
+
+export function getStaticPaths() {
+  return tools.map((tool, index) => ({
+    params: { slug: tool.slug },
+    props: { tool, index },
+  }));
+}
+
+const { tool, index } = Astro.props;
+
+const COMPONENTS: Record<ToolSlug, any> = {
+  "har-sanitizer": HarSanitizer,
+  "jwt-inspector": JwtInspector,
+  "csp-evaluator": CspEvaluator,
+  "header-analyzer": HeaderAnalyzer,
+  "payload-bench": PayloadBench,
+  "endpoint-mapper": EndpointMapper,
+};
+
+const Tool = COMPONENTS[tool.slug];
+const next = tools[(index + 1) % tools.length];
+const prev = tools[(index - 1 + tools.length) % tools.length];
+---
+
+<Base
+  title={`${tool.title} — ${SITE.name}`}
+  description={tool.blurb}
+  canonical={`${SITE.url}/tools/${tool.slug}`}
+>
+  <div class="wrap">
+    <div class="tool-head">
+      <div class="crumb">
+        <a href="/">{SITE.name}</a> / tools / {tool.n}
+      </div>
+      <h1>{tool.title}</h1>
+      <p>{tool.long}</p>
+      <div class="tool-tags">
+        {tool.tags.map((tag) => <span class="tag">{tag}</span>)}
+        <span class="tag live">no network</span>
+      </div>
+    </div>
+
+    <div class="tool-body">
+      <div class="tool-grid">
+        <div>
+          <Tool />
+        </div>
+
+        <aside class="side">
+          <div class="shell">
+            <div class="shell-h">
+              <span>what it checks</span>
+            </div>
+            <div class="shell-b">
+              <ul class="list">
+                {tool.notes.map((note) => <li>{note}</li>)}
+              </ul>
+            </div>
+          </div>
+
+          <div class="shell">
+            <div class="shell-h">
+              <span>limits</span>
+            </div>
+            <div class="shell-b">
+              <ul class="list">
+                {tool.limits.map((limit) => <li>{limit}</li>)}
+              </ul>
+            </div>
+          </div>
+
+          <div class="shell">
+            <div class="shell-h">
+              <span>around</span>
+            </div>
+            <div class="shell-b">
+              <a class="around" href={`/tools/${prev.slug}`}>
+                <span class="kv">previous</span>
+                <span>{prev.n} — {prev.title}</span>
+              </a>
+              <a class="around" href={`/tools/${next.slug}`}>
+                <span class="kv">next</span>
+                <span>{next.n} — {next.title}</span>
+              </a>
+              <a class="around" href="/#tools">
+                <span class="kv">index</span>
+                <span>all six tools</span>
+              </a>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .list {
+    margin: 0;
+    padding-left: 16px;
+    display: grid;
+    gap: 7px;
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .list li::marker {
+    color: var(--dim);
+  }
+  .around {
+    display: grid;
+    gap: 2px;
+    padding: 9px 11px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r);
+    font-size: 13px;
+    transition: border-color 0.2s;
+  }
+  .around:hover {
+    border-color: var(--acc);
+  }
+</style>

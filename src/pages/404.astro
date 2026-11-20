@@ -1,0 +1,26 @@
+---
+import Base from "../layouts/Base.astro";
+import { SITE } from "../data/site";
+---
+
+<Base
+  title={`404 — ${SITE.name}`}
+  description="No page at this route. The toolkit is on the home page."
+  canonical={`${SITE.url}/404`}
+  noindex
+>
+  <div class="wrap">
+    <section class="tool-head">
+      <div class="crumb"><a href="/">← back to {SITE.name}</a></div>
+      <h1>404 — this route has no handler.</h1>
+      <p>
+        The URL is wrong or the page moved. Nothing here runs server-side, so there is no
+        stack trace to leak either.
+      </p>
+      <div class="ctas mt-22">
+        <a class="btn btn-p" href="/#tools">Open the toolkit</a>
+        <a class="btn btn-g" href="/">Home</a>
+      </div>
+    </section>
+  </div>
+</Base>

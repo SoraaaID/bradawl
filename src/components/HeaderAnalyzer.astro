@@ -1,0 +1,254 @@
+---
+---
+<div class="shell" data-hdrs>
+  <div class="shell-h">
+    <span>headers.grade</span>
+    <span class="tag live">live</span>
+  </div>
+
+  <div class="shell-b">
+    <div class="field">
+      <label for="hdr-in">response headers</label>
+      <textarea id="hdr-in" data-input spellcheck="false" class="min-h-140">HTTP/1.1 200 OK
+Server: nginx/1.24.0
+Content-Type: text/html; charset=utf-8
+Strict-Transport-Security: max-age=63072000; includeSubDomains
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+Referrer-Policy: strict-origin-when-cross-origin</textarea>
+      <span class="hint" data-curl>curl -sI https://example.com | clip</span>
+    </div>
+
+    <div class="row-btns">
+      <button class="btn btn-g btn-s" data-copy-curl type="button">Copy curl command</button>
+      <div class="score g-c ml-auto" data-score><span class="g" data-grade>-</span><span class="n" data-points></span></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>header</th><th class="col-state">state</th><th>note</th></tr>
+        </thead>
+        <tbody data-rows></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="shell-f">
+    <span>parsed locally · no request made</span>
+    <span data-count>0 headers</span>
+  </div>
+</div>
+
+<style>
+  .note-cell {
+    color: var(--text);
+    font-size: 12.5px;
+  }
+  .note-cell.quiet {
+    color: var(--muted);
+  }
+</style>
+
+<script>
+  type Check = {
+    name: string;
+    label: string;
+    weight: number;
+    run: (
+      value: string | undefined,
+      map: Map<string, string>,
+    ) => { earned: number; state: "ok" | "weak" | "missing"; note: string };
+  };
+
+  const CHECK = {
+    ok: (note: string) => ({ earned: 1, state: "ok" as const, note }),
+    weak: (note: string) => ({ earned: 0.4, state: "weak" as const, note }),
+    missing: (note: string) => ({ earned: 0, state: "missing" as const, note }),
+  };
+
+  const CHECKS: Check[] = [
+    {
+      name: "content-security-policy",
+      label: "CSP",
+      weight: 20,
+      run: (v) => {
+        if (!v) return CHECK.missing("absent — no mitigation for injected script");
+        if (/'unsafe-inline'|'unsafe-eval'|\*/.test(v))
+          return CHECK.weak("present, but allows unsafe-inline / unsafe-eval / wildcard");
+        return CHECK.ok("present without the usual escape hatches");
+      },
+    },
+    {
+      name: "strict-transport-security",
+      label: "HSTS",
+      weight: 15,
+      run: (v) => {
+        if (!v) return CHECK.missing("absent — first request can still go over http");
+        const max = Number(/max-age\s*=\s*(\d+)/i.exec(v)?.[1] || 0);
+        if (max < 15552000) return CHECK.weak(`max-age ${max}s — below 180 days`);
+        if (!/includeSubDomains/i.test(v)) return CHECK.weak("long max-age, but subdomains are not covered");
+        return CHECK.ok(`max-age ${max}s with includeSubDomains`);
+      },
+    },
+    {
+      name: "x-content-type-options",
+      label: "nosniff",
+      weight: 12,
+      run: (v) =>
+        !v
+          ? CHECK.missing("absent — browsers may sniff a different content type")
+          : /nosniff/i.test(v)
+            ? CHECK.ok("nosniff")
+            : CHECK.weak("present with an unexpected value"),
+    },
+    {
+      name: "x-frame-options",
+      label: "frame",
+      weight: 10,
+      run: (v, map) => {
+        // frame-ancestors is the modern control and supersedes XFO; a site
+        // using only the header should not lose points for it.
+        if (/frame-ancestors/i.test(map.get("content-security-policy") || ""))
+          return CHECK.ok("covered by CSP frame-ancestors");
+        if (!v) return CHECK.missing("absent — page can be framed unless CSP frame-ancestors covers it");
+        return /^(deny|sameorigin)$/i.test(v.trim()) ? CHECK.ok(v.trim().toUpperCase()) : CHECK.weak("ALLOW-FROM or unknown value");
+      },
+    },
+    {
+      name: "referrer-policy",
+      label: "referrer",
+      weight: 10,
+      run: (v) => {
+        if (!v) return CHECK.weak("absent — browsers default to strict-origin-when-cross-origin, but be explicit");
+        if (/unsafe-url|no-referrer-when-downgrade/i.test(v)) return CHECK.weak(`${v} — leaks full URLs cross-origin`);
+        return CHECK.ok(v);
+      },
+    },
+    {
+      name: "permissions-policy",
+      label: "permissions",
+      weight: 8,
+      run: (v) => {
+        if (!v) return CHECK.weak("absent — camera, mic, geolocation stay on default allowlists");
+        if (/=\s*\*/.test(v)) return CHECK.weak("wildcard origin — the feature is open to every frame");
+        return CHECK.ok(v);
+      },
+    },
+    {
+      name: "cross-origin-opener-policy",
+      label: "COOP",
+      weight: 9,
+      run: (v) =>
+        v && /^same-origin$/i.test(v.trim())
+          ? CHECK.ok(v.trim())
+          : CHECK.weak(v ? `${v.trim()} — same-origin is the isolation value` : "absent — no cross-origin opener isolation"),
+    },
+    {
+      name: "cross-origin-resource-policy",
+      label: "CORP",
+      weight: 8,
+      run: (v) =>
+        v && /^(same-origin|same-site)$/i.test(v.trim())
+          ? CHECK.ok(v.trim())
+          : CHECK.weak(v ? v.trim() : "absent — resources may be embedded cross-origin"),
+    },
+    {
+      name: "cross-origin-embedder-policy",
+      label: "COEP",
+      weight: 4,
+      run: (v) =>
+        v && /^(require-corp|credentialless)$/i.test(v.trim())
+          ? CHECK.ok(v.trim())
+          : CHECK.weak(v ? v.trim() : "absent — needed only for crossOriginIsolated features"),
+    },
+    {
+      name: "x-powered-by",
+      label: "stack leak",
+      weight: 4,
+      run: (v) => (v ? CHECK.weak(`discloses ${v}`) : CHECK.ok("no framework banner")),
+    },
+  ];
+
+  function parseHeaders(raw: string) {
+    const map = new Map<string, string>();
+    let last = "";
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      if (/^\s/.test(line) && last) {
+        map.set(last, map.get(last)! + " " + line.trim());
+        continue;
+      }
+      if (/^HTTP\/\d/i.test(line)) continue;
+      const idx = line.indexOf(":");
+      if (idx < 1) continue;
+      last = line.slice(0, idx).trim().toLowerCase();
+      map.set(last, line.slice(idx + 1).trim());
+    }
+    return map;
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-hdrs]").forEach((root) => {
+    const input = root.querySelector<HTMLTextAreaElement>("[data-input]")!;
+    const rows = root.querySelector<HTMLElement>("[data-rows]")!;
+    const gradeEl = root.querySelector<HTMLElement>("[data-grade]")!;
+    const pointsEl = root.querySelector<HTMLElement>("[data-points]")!;
+    const scoreEl = root.querySelector<HTMLElement>("[data-score]")!;
+    const countEl = root.querySelector<HTMLElement>("[data-count]")!;
+    const copyCurl = root.querySelector<HTMLButtonElement>("[data-copy-curl]")!;
+
+    const render = () => {
+      const map = parseHeaders(input.value);
+      const results = CHECKS.map((c) => ({ c, r: c.run(map.get(c.name), map) }));
+      const max = CHECKS.reduce((a, c) => a + c.weight, 0);
+      const earned = results.reduce((a, { c, r }) => a + r.earned * c.weight, 0);
+      const score = Math.round((earned / max) * 100);
+      const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : score >= 50 ? "E" : "F";
+
+      gradeEl.textContent = grade;
+      pointsEl.textContent = `${score} / 100`;
+      scoreEl.className = "score g-" + grade.toLowerCase();
+      countEl.textContent = `${map.size} header${map.size === 1 ? "" : "s"}`;
+
+      rows.replaceChildren(
+        ...results.map(({ c, r }) => {
+          const tr = document.createElement("tr");
+          const td1 = document.createElement("td");
+          td1.className = "m";
+          td1.textContent = c.name;
+          const td2 = document.createElement("td");
+          const tag = document.createElement("span");
+          tag.className = "chip " + (r.state === "ok" ? "ok" : r.state === "weak" ? "warn" : "bad");
+          tag.textContent = r.state;
+          td2.append(tag);
+          const td3 = document.createElement("td");
+          td3.className = "note-cell" + (r.state === "ok" ? " quiet" : "");
+          td3.textContent = r.note;
+          tr.append(td1, td2, td3);
+          return tr;
+        }),
+      );
+    };
+
+    let timer: number | undefined;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(render, 120);
+    });
+
+    copyCurl.addEventListener("click", async () => {
+      const cmd = 'curl -sI "https://example.com" | clip';
+      const label = copyCurl.dataset.label || (copyCurl.dataset.label = copyCurl.textContent || "");
+      try {
+        await navigator.clipboard.writeText(cmd);
+        copyCurl.textContent = "Copied";
+        setTimeout(() => (copyCurl.textContent = label), 1200);
+      } catch {
+        copyCurl.textContent = "clipboard blocked";
+        setTimeout(() => (copyCurl.textContent = label), 1600);
+      }
+    });
+
+    render();
+  });
+</script>

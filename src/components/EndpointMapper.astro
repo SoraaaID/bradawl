@@ -1,0 +1,238 @@
+---
+---
+<div class="shell" data-ep>
+  <div class="shell-h">
+    <span>endpoints.map</span>
+    <span class="tag live">local</span>
+  </div>
+
+  <div class="shell-b">
+    <div class="field">
+      <label for="ep-in">one endpoint per line — method optional</label>
+      <textarea id="ep-in" data-input spellcheck="false" class="min-h-130">GET https://api.example.com/v1/users/1042/orders?page=2&limit=50
+POST https://api.example.com/v1/users/1042/avatar?upload=1
+GET https://api.example.com/v1/orders/8f2a-91c?expand=items
+DELETE https://api.example.com/v1/files/9912</textarea>
+      <span class="hint">query keys and path ids are pulled out automatically</span>
+    </div>
+
+    <div class="row-btns">
+      <button class="btn btn-g btn-s" data-export type="button">Copy checklist</button>
+      <span class="hint" data-status></span>
+      <div class="summary-note" data-summary></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th class="col-method">method</th><th>path</th><th class="col-params">parameters</th></tr>
+        </thead>
+        <tbody data-rows></tbody>
+      </table>
+    </div>
+
+    <pre class="mono-block sm" data-md hidden></pre>
+  </div>
+
+  <div class="shell-f">
+    <span>nothing is requested — this is a list processor</span>
+    <span data-count></span>
+  </div>
+</div>
+
+<style>
+  .ep-host {
+    color: var(--dim);
+    font-size: 10.5px;
+  }
+  .ep-path {
+    color: var(--text);
+  }
+</style>
+
+<script>
+  const HOT = /^(id|uid|uuid|user|user_?id|account|account_?id|order|order_?id|file|file_?id|doc|document|invoice|payment|txn|transaction|tenant|org|workspace|project|pid|url|uri|redirect|next|return|callback|path|src|dest|target|token|key|email|phone)$/i;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const NUM = /^\d+$/;
+
+  type Endpoint = {
+    method: string;
+    host: string;
+    path: string;
+    params: { name: string; kind: "query" | "path"; hot: boolean }[];
+  };
+
+  function parseLine(line: string): Endpoint | null {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return null;
+    const m = /^(?:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+)?(\S+)$/i.exec(trimmed);
+    if (!m) return null;
+    const method = (m[1] || "GET").toUpperCase();
+    const raw = m[2];
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+    const looksLikeHost =
+      /^(?:[\w.-]+\.[a-z]{2,}|localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\])(?::\d+)?(?:[/?#]|$)/i.test(raw);
+    const normalized = raw.startsWith("/") || hasScheme || !looksLikeHost ? raw : "https://" + raw;
+    let url: URL;
+    try {
+      url = new URL(normalized.startsWith("/") ? "https://placeholder.local" + normalized : normalized);
+    } catch {
+      return null;
+    }
+    if (!/^https?:$/.test(url.protocol)) return null;
+
+    const params: Endpoint["params"] = [];
+    url.searchParams.forEach((_, k) => {
+      if (!params.some((p) => p.name === k)) params.push({ name: k, kind: "query", hot: HOT.test(k) });
+    });
+    const segments = url.pathname.split("/").filter(Boolean);
+    const canonical = segments.map((seg) => {
+      if (UUID.test(seg)) {
+        // Normalise path parameters so /files/<uuid-a> and /files/<uuid-b>
+        // collapse into one route instead of one row per id.
+        if (!params.some((p) => p.name === ":uuid")) params.push({ name: ":uuid", kind: "path", hot: true });
+        return ":uuid";
+      }
+      if (NUM.test(seg)) {
+        if (!params.some((p) => p.name === ":id")) params.push({ name: ":id", kind: "path", hot: true });
+        return ":id";
+      }
+      return seg;
+    });
+
+    return {
+      method,
+      host: url.host === "placeholder.local" ? "(relative)" : url.host,
+      path: "/" + canonical.join("/"),
+      params,
+    };
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-ep]").forEach((root) => {
+    const input = root.querySelector<HTMLTextAreaElement>("[data-input]")!;
+    const rows = root.querySelector<HTMLElement>("[data-rows]")!;
+    const summary = root.querySelector<HTMLElement>("[data-summary]")!;
+    const count = root.querySelector<HTMLElement>("[data-count]")!;
+    const status = root.querySelector<HTMLElement>("[data-status]")!;
+    const mdOut = root.querySelector<HTMLElement>("[data-md]")!;
+    const exportBtn = root.querySelector<HTMLButtonElement>("[data-export]")!;
+
+    let parsed: Endpoint[] = [];
+
+    const render = () => {
+      parsed = input.value
+        .split(/\r?\n/)
+        .map(parseLine)
+        .filter((x): x is Endpoint => Boolean(x));
+
+      const uniq = new Map<string, Endpoint>();
+      for (const e of parsed) {
+        const names = e.params.map((p) => p.name).sort().join(",");
+        uniq.set(e.method + " " + e.host + e.path + " " + names, e);
+      }
+      parsed = [...uniq.values()];
+
+      const paramSet = new Set(parsed.flatMap((e) => e.params.map((p) => p.name)));
+      const hosts = new Set(parsed.map((e) => e.host));
+      const hot = parsed.reduce((n, e) => n + e.params.filter((p) => p.hot).length, 0);
+
+      summary.textContent = `${parsed.length} endpoints · ${paramSet.size} params · ${hosts.size} host${hosts.size === 1 ? "" : "s"}`;
+      count.textContent = hot ? `${hot} hot params` : "no hot params";
+
+      if (!parsed.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 3;
+        td.innerHTML = '<div class="empty flat">paste a list of URLs to map them</div>';
+        tr.append(td);
+        rows.replaceChildren(tr);
+        return;
+      }
+
+      rows.replaceChildren(
+        ...parsed.map((e) => {
+          const tr = document.createElement("tr");
+
+          const td1 = document.createElement("td");
+          const mchip = document.createElement("span");
+          mchip.className = "chip";
+          mchip.textContent = e.method;
+          td1.append(mchip);
+
+          const td2 = document.createElement("td");
+          td2.className = "m";
+          const host = document.createElement("div");
+          host.className = "ep-host";
+          host.textContent = e.host;
+          const path = document.createElement("div");
+          path.className = "ep-path";
+          path.textContent = e.path;
+          td2.append(host, path);
+
+          const td3 = document.createElement("td");
+          const wrap = document.createElement("div");
+          wrap.className = "chips";
+          if (!e.params.length) {
+            const none = document.createElement("span");
+            none.className = "hint";
+            none.textContent = "none";
+            wrap.append(none);
+          }
+          for (const p of e.params) {
+            const c = document.createElement("span");
+            c.className = "chip" + (p.hot ? " warn" : "");
+            c.textContent = p.name;
+            wrap.append(c);
+          }
+          td3.append(wrap);
+
+          tr.append(td1, td2, td3);
+          return tr;
+        }),
+      );
+    };
+
+    const buildMd = () => {
+      const byHost = new Map<string, Endpoint[]>();
+      for (const e of parsed) {
+        if (!byHost.has(e.host)) byHost.set(e.host, []);
+        byHost.get(e.host)!.push(e);
+      }
+      const lines = [
+        "# endpoint map",
+        "",
+        `generated ${new Date().toISOString().slice(0, 10)} · ${parsed.length} endpoints`,
+        "",
+      ];
+      for (const [host, list] of byHost) {
+        lines.push(`## ${host}`, "");
+        for (const e of list) {
+          const params = e.params.length ? ` — params: ${e.params.map((p) => p.name).join(", ")}` : "";
+          lines.push(`- [ ] \`${e.method} ${e.path}\`${params}`);
+        }
+        lines.push("");
+      }
+      return lines.join("\n");
+    };
+
+    exportBtn.addEventListener("click", async () => {
+      const md = buildMd();
+      mdOut.hidden = false;
+      mdOut.textContent = md;
+      try {
+        await navigator.clipboard.writeText(md);
+        status.textContent = "checklist copied to clipboard";
+      } catch {
+        status.textContent = "clipboard blocked — select the text below";
+      }
+      setTimeout(() => (status.textContent = ""), 2200);
+    });
+
+    let timer: number | undefined;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(render, 120);
+    });
+    render();
+  });
+</script>

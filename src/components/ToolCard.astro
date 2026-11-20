@@ -1,0 +1,79 @@
+---
+import type { Tool } from "../data/tools";
+
+interface Props {
+  tool: Tool;
+}
+
+const { tool } = Astro.props;
+const cls = "card " + (tool.layout === "feat" ? "c-feat" : tool.layout === "sm" ? "c-sm" : "c-wide");
+const isWide = tool.layout === "wide";
+const isFeat = tool.layout === "feat";
+---
+
+<a class={cls} href={`/tools/${tool.slug}`}>
+  {isWide ? (
+    <div class="grow">
+      <div class="idx">{tool.n} / live</div>
+      <h3 class="wide-title">{tool.title}</h3>
+      <p>{tool.blurb}</p>
+    </div>
+  ) : (
+    <>
+      <div class="idx">{isFeat ? `${tool.n} / featured` : tool.n}</div>
+      <h3>{tool.title}</h3>
+      <p>{tool.blurb}</p>
+    </>
+  )}
+
+  {
+    isFeat && (
+      <div class="diff">
+        <span class="c">{"// before"}</span><br />
+        <span class="del">Cookie: session=8f2a…; csrf=97be…</span><br />
+        <span class="del">Authorization: Bearer eyJhbGciOi…</span><br />
+        <span class="c">{"// after"}</span><br />
+        <span class="add">Cookie: [redacted]</span><br />
+        <span class="add">Authorization: [redacted]</span>
+      </div>
+    )
+  }
+
+  <div class="foot">
+    {isFeat && (
+      <ul class="feat-opts">
+        <li>cookies &amp; auth headers</li>
+        <li>query parameters</li>
+        <li>request &amp; response bodies</li>
+        <li>emails &amp; JWTs in text</li>
+      </ul>
+    )}
+    {isWide && <span class="tag">open</span>}
+    {tool.tags.map((tag) => <span class={tag === "live" ? "tag live" : "tag"}>{tag}</span>)}
+  </div>
+</a>
+
+<style>
+  .wide-title {
+    margin-top: 6px;
+  }
+  .feat-opts {
+    flex: 0 0 100%;
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+    display: grid;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.03em;
+    color: var(--dim);
+  }
+  .feat-opts li::before {
+    content: "▪ ";
+    color: var(--acc);
+  }
+  .card:not(.c-feat) .feat-opts {
+    display: none;
+  }
+</style>

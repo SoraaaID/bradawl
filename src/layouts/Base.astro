@@ -1,0 +1,106 @@
+---
+import "../styles/global.css";
+import { SITE, TAGLINE } from "../data/site";
+
+interface Props {
+  title: string;
+  description: string;
+  canonical?: string;
+  facts?: boolean;
+  noindex?: boolean;
+}
+
+const {
+  title,
+  description,
+  canonical = `${SITE.url}/`,
+  facts = false,
+  noindex = false,
+} = Astro.props;
+---
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex" />}
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={`${SITE.url}/og.png`} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={`${SITE.name} — ${TAGLINE}`} />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={`${SITE.url}/og.png`} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline src="/theme-init.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">skip to content</a>
+    <div class="topline"></div>
+
+    <header class="nav">
+      <div class="wrap nav-in">
+        <a class="brand" href="/"><span class="mark"></span>{SITE.name}</a>
+        <a class="link" href="/#tools">tools</a>
+        <a class="link" href="/#work">case notes</a>
+        <a class="link" href="/#privacy">how it works</a>
+        <span class="spacer"></span>
+        <button class="tbtn" id="theme" aria-label="color theme: dark">dark</button>
+        <a class="btn btn-g btn-s" href={SITE.repo} rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+
+    <footer id="privacy">
+      <div class="wrap">
+        {
+          facts && (
+            <div class="facts">
+              <div><div class="n">0</div><div class="l">requests after load</div></div>
+              <div><div class="n">0</div><div class="l">cookies or trackers</div></div>
+              <div><div class="n">0</div><div class="l">accounts required</div></div>
+            </div>
+          )
+        }
+        <div class="fbot">
+          <div class="l">{SITE.name} — client-side by design. view source, it is the whole site.</div>
+          <div class="l">
+            <a href="/.well-known/security.txt">security.txt</a> &nbsp;·&nbsp;
+            <a href={`mailto:${SITE.email}`}>{SITE.email}</a> &nbsp;·&nbsp;
+            <a href={SITE.repo} rel="noopener">github</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const root = document.documentElement;
+      const btn = document.getElementById("theme");
+      const apply = (t: string) => {
+        root.dataset.theme = t;
+        if (btn) {
+          btn.textContent = t;
+          btn.setAttribute("aria-label", "color theme: " + t);
+        }
+        try {
+          localStorage.setItem("bw-theme", t);
+        } catch (e) {}
+      };
+      apply(root.dataset.theme || "dark");
+      btn?.addEventListener("click", () => {
+        apply(root.dataset.theme === "dark" ? "light" : "dark");
+      });
+    </script>
+  </body>
+</html>
