@@ -214,6 +214,7 @@ h2{margin:0 0 8px;font-size:clamp(24px,2.7vw,34px);letter-spacing:-.022em;font-w
 .row .meta{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.05em;line-height:1.8}
 .row h3{margin:0 0 3px;font-size:16px;font-weight:600;letter-spacing:-.01em}
 .row p{margin:0;font-size:13.5px;color:var(--muted);max-width:72ch}
+.row p code{font-family:var(--mono);font-size:12px;color:var(--text);background:var(--panel-2);border:1px solid var(--line-soft);border-radius:2px;padding:1px 5px}
 .row .amt{font-family:var(--mono);font-size:12.5px;text-align:right;letter-spacing:.02em}
 .row .amt span{display:block;font-size:10px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-top:3px}
 

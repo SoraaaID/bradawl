@@ -26,7 +26,7 @@ src/
   data/site.ts       brand name, canonical URL, contact email, repo URL — the only place the name lives
   layouts/Base.astro head, nav, footer, theme toggle
   pages/
-    index.astro      hero + live JWT panel + tool grid + case notes
+    index.astro      hero + live JWT panel + tool grid + field notes
     tools/[slug].astro  one page per tool, generated from src/data/tools.ts
   styles/global.css
 public/
@@ -106,7 +106,6 @@ Every tool follows the same rules:
 
 - `src/data/site.ts` — `repo` points at `https://github.com/SoraaaID/bradawl`. Change it here and nowhere else.
 - `scripts/og.ps1` — the card text is written into the script; run `npm run og` after any rename.
-- Case notes on `src/pages/index.astro` are marked `placeholder data`
 - `public/.well-known/security.txt` — `Expires` date and contact
 - `astro.config.mjs` `site` and `public/sitemap.xml` — both must match `SITE.url` when the domain changes
 - `shots/` — old screenshots, safe to delete

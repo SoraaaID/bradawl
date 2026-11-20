@@ -21,7 +21,7 @@ import { SITE, TAGLINE } from "../data/site";
         </p>
         <div class="ctas">
           <a class="btn btn-p" href="#tools">Open the toolkit</a>
-          <a class="btn btn-g" href="#work">Read case notes</a>
+          <a class="btn btn-g" href="#notes">Read field notes</a>
         </div>
         <div class="hero-note">
           <span>parsed in-browser</span>
@@ -46,43 +46,45 @@ import { SITE, TAGLINE } from "../data/site";
       </div>
     </section>
 
-    <section class="sec" id="work">
-      <h2>Case notes<span class="pill">placeholder data</span></h2>
-      <p class="h2meta">disclosures with program names removed per policy</p>
+    <section class="sec" id="notes">
+      <h2>Field notes</h2>
+      <p class="h2meta">failure modes these tools exist to catch</p>
 
       <div class="log">
         <div class="row">
-          <div class="meta">2026 · fintech<br />web · api</div>
+          <div class="meta">2026 · har<br />query strings &amp; bodies</div>
           <div>
-            <h3>Race condition in checkout</h3>
+            <h3>Cookies are the easy part</h3>
             <p>
-              Parallel coupon redemption over a single order. Four discounts applied from one cart; the
-              ledger reconciled only at settlement.
+              Headers are the loud layer — everyone scrubs <code>Cookie</code> and <code>Authorization</code>.
+              Query strings, <code>redirectURL</code> chains, and form bodies carry the same session material,
+              and a HAR exporter records all of them verbatim.
             </p>
           </div>
-          <div class="amt">$4,000<span>paid</span></div>
+          <div class="amt">har sanitizer<span>tool</span></div>
         </div>
         <div class="row">
-          <div class="meta">2026 · saas<br />web</div>
+          <div class="meta">2026 · jwt<br />decode vs verify</div>
           <div>
-            <h3>Cross-tenant file read</h3>
+            <h3>A signature check can exist and never run</h3>
             <p>
-              Attachment IDs were sequential and checked for existence, not ownership. One authenticated
-              request reached another workspace's invoices.
+              Most libraries decode a token to read claims without touching the signature. That is fine for a
+              UI and fatal on a server: if the request handler only calls <code>decode</code>, the token is
+              attacker-authored data wearing a valid shape.
             </p>
           </div>
-          <div class="amt">$1,500<span>paid</span></div>
+          <div class="amt">jwt inspector<span>tool</span></div>
         </div>
         <div class="row">
-          <div class="meta">2025 · marketplace<br />auth</div>
+          <div class="meta">2026 · csp<br />directive precedence</div>
           <div>
-            <h3>Signature check skipped on legacy route</h3>
+            <h3>A header grade is not a risk score</h3>
             <p>
-              An old API version verified the JWT shape but never the signature. Forged tokens from any
-              account were accepted on that path only.
+              Nine checks can pass while one <code>script-src</code> with <code>'unsafe-inline'</code> makes the
+              whole policy decorative. What matters is which directive wins, not how many headers were sent.
             </p>
           </div>
-          <div class="amt">$2,200<span>paid</span></div>
+          <div class="amt">csp evaluator<span>tool</span></div>
         </div>
       </div>
     </section>
