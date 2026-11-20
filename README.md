@@ -2,6 +2,8 @@
 
 Six client-side security utilities, one Astro site. No backend, no accounts, no analytics — every parse happens in the visitor's tab and the build output is static HTML plus a handful of inline scripts.
 
+Live: https://bradawl.soradev-id.workers.dev
+
 ## Demo
 
 | | |

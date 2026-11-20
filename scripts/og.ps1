@@ -36,7 +36,7 @@ $fSmall   = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontS
 $fStrip   = New-Object System.Drawing.Font("Consolas", 14, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
 
 # eyebrow
-$g.DrawString("BRADAWL.DEV  /  CLIENT-SIDE TOOLKIT", $fLabel, $brushMuted, 72, 84)
+$g.DrawString("CLIENT-SIDE TOOLKIT  /  SIX TOOLS", $fLabel, $brushMuted, 72, 84)
 
 # wordmark: amber mark + name
 $g.FillRectangle($brushAcc, 72, 232, 13, 13)

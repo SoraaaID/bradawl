@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://bradawl.dev/sitemap.xml
+Sitemap: https://bradawl.soradev-id.workers.dev/sitemap.xml

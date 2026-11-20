@@ -1,6 +1,6 @@
 # Post-deploy checks against a live domain. Run after `npm run deploy` or after
 # connecting the repo to Cloudflare Pages:
-#   npm run verify:deploy -- -Domain https://bradawl.pages.dev
+#   npm run verify:deploy -- -Domain https://bradawl.soradev-id.workers.dev
 # Compatible with Windows PowerShell 5.1 (no -SkipHttpErrorCheck needed).
 param(
   [Parameter(Mandatory = $true)][string]$Domain

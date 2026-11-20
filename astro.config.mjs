@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://bradawl.dev",
+  site: "https://bradawl.soradev-id.workers.dev",
   compressHTML: true,
   experimental: {
     csp: {
