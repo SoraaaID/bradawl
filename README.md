@@ -54,17 +54,18 @@ npm run check      # astro check — types + template diagnostics, must be 0/0/0
 npm run og         # regenerate public/og.png (brand name lives in the card)
 npm run build      # static output in dist/
 npm run preview    # serve the build locally
-npx wrangler pages dev dist --port 4322   # serve dist with _headers applied
 ```
 
 `astro check` is backed by `@astrojs/check` and `typescript` (devDependencies). It is the type gate; a build can succeed with template warnings that `check` catches.
 
-Deploy:
+Deploy: `wrangler.jsonc` declares this as an assets-only Worker serving `dist/`, with `not_found_handling: 404-page` so unknown paths return `dist/404.html` with a 404 status. `public/_headers` is picked up from the asset directory on upload.
 
 ```bash
-npm run build
-npx wrangler pages deploy dist --project-name bradawl
+npm run deploy     # astro build && wrangler deploy
+npm run verify:deploy -- -Domain https://<domain>   # routes, headers, cache, CSP
 ```
+
+`scripts/verify-deploy.ps1` checks all seven routes, the 404 status, `security.txt`, `sitemap.xml`, `robots.txt`, `og.png`, every security header, the immutable cache rule on a hashed `/_astro` asset, and the CSP meta policy. It needs a deployed domain — half of it cannot pass locally because `astro preview` does not apply `_headers`.
 
 `@astrojs/sitemap` is not installed on purpose — `public/sitemap.xml` is written by hand and there are only seven URLs.
 
@@ -101,11 +102,3 @@ Every tool follows the same rules:
 ### Endpoint Mapper
 
 `src/components/EndpointMapper.astro`. Parses one URL per line, extracts query keys and numeric/UUID path segments, marks hot parameter names, exports a grouped markdown checklist.
-
-## Placeholders to replace before launch
-
-- `src/data/site.ts` — `repo` points at `https://github.com/SoraaaID/bradawl`. Change it here and nowhere else.
-- `scripts/og.ps1` — the card text is written into the script; run `npm run og` after any rename.
-- `public/.well-known/security.txt` — `Expires` date and contact
-- `astro.config.mjs` `site` and `public/sitemap.xml` — both must match `SITE.url` when the domain changes
-- `shots/` — old screenshots, safe to delete
